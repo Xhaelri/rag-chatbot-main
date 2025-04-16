@@ -254,7 +254,7 @@ export default function Chat() {
                     {new Date(message.createdAt ?? Date.now()).toLocaleTimeString([], {
                       hour: "2-digit",
                       minute: "2-digit",
-                      hour12: false // Use 24-hour format for clarity if preferred
+                      hour12: true // Use 24-hour format for clarity if preferred
                     })}
                   </div>
                 </div>

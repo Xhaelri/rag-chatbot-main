@@ -244,7 +244,7 @@ ${docContext}
     const result = await streamText({
       model: google("gemini-1.5-flash"), // Using flash model as specified before
       messages: allMessages,
-      temperature: 0.3, // Slightly increased temperature for more conversational help
+      temperature: 0.5, // Slightly increased temperature for more conversational help
     }); // Return the stream
 
     return result.toDataStreamResponse();
