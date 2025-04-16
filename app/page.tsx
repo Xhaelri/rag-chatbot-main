@@ -8,6 +8,8 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { atomDark } from "react-syntax-highlighter/dist/cjs/styles/prism";
+import { CraftsmenGrid } from "@/components/ui/CraftsmenGrid";
+import { extractCraftsmanData, messageContainsCraftsmanData } from "@/lib/extract-craftsman-data";
 
 const api = "/api/chat";
 
@@ -81,93 +83,123 @@ export default function Chat() {
             </div>
           )}
 
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex ${
-                message.role === "user" ? "justify-end" : "justify-start"
-              }`}
-            >
+          {messages.map((message) => {
+            // Extract craftsman data if this is an assistant message with craftsman data
+            const hasCraftsmanData = 
+              message.role === "assistant" && 
+              message.parts.some(part => 
+                part.type === "text" && messageContainsCraftsmanData(part.text)
+              );
+            
+            let craftsmenData = [];
+            let displayText = "";
+            
+            if (hasCraftsmanData && message.parts[0]?.type === "text") {
+              // Extract craftsman data and prepare text for display
+              const messageText = message.parts[0].text;
+              craftsmenData = extractCraftsmanData(messageText);
+              
+              // Clean up text by removing document markers
+              displayText = messageText
+                .replace(/--- المستند \d+: .+ ---\n/g, '')
+                .replace(/--- نهاية المستند \d+ ---/g, '')
+                .replace(/\(مدى الصلة: [0-9.]+\)/g, '');
+            }
+            
+            return (
               <div
-                className={`rounded-2xl px-4 py-3 max-w-[85%] shadow-sm ${
-                  message.role === "user"
-                    ? "bg-indigo-600 text-white"
-                    : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                key={message.id}
+                className={`flex ${
+                  message.role === "user" ? "justify-end" : "justify-start"
                 }`}
               >
-                {message.parts.map((part, i) => {
-                  switch (part.type) {
-                    case "text":
-                      return (
-                        <div
-                          key={`${message.id}-${i}`}
-                          className={`prose prose-sm ${
-                            message.role === "user"
-                              ? "prose-invert max-w-none"
-                              : "max-w-none dark:prose-invert"
-                          }`}
-                        >
-                          {message.role === "assistant" ? (
-                            <div className="flex gap-2 items-start">
-                              <div className="h-8 w-8 p-1.5 shrink-0 rounded-full bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center text-indigo-600 dark:text-indigo-300">
-                                <Sparkles className="w-5 h-5" />
+                <div
+                  className={`rounded-2xl px-4 py-3 max-w-[85%] shadow-sm ${
+                    message.role === "user"
+                      ? "bg-indigo-600 text-white"
+                      : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                  }`}
+                >
+                  {message.parts.map((part, i) => {
+                    switch (part.type) {
+                      case "text":
+                        return (
+                          <div
+                            key={`${message.id}-${i}`}
+                            className={`prose prose-sm ${
+                              message.role === "user"
+                                ? "prose-invert max-w-none"
+                                : "max-w-none dark:prose-invert"
+                            }`}
+                          >
+                            {message.role === "assistant" ? (
+                              <div className="flex gap-2 items-start">
+                                <div className="h-8 w-8 p-1.5 shrink-0 rounded-full bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center text-indigo-600 dark:text-indigo-300">
+                                  <Sparkles className="w-5 h-5" />
+                                </div>
+                                <div className="min-w-0">
+                                  <ReactMarkdown
+                                    components={{
+                                      code({
+                                        node,
+                                        inline,
+                                        className,
+                                        children,
+                                        ...props
+                                      }: {
+                                        node: any;
+                                        inline?: boolean;
+                                        className?: string;
+                                        children: React.ReactNode;
+                                        [key: string]: any;
+                                      }) {
+                                        const match = /language-(\w+)/.exec(
+                                          className || ""
+                                        );
+                                        return !inline && match ? (
+                                          <SyntaxHighlighter
+                                            style={atomDark}
+                                            language={match[1]}
+                                            PreTag="div"
+                                            {...props}
+                                          >
+                                            {String(children).replace(/\n$/, "")}
+                                          </SyntaxHighlighter>
+                                        ) : (
+                                          <code className={className} {...props}>
+                                            {children}
+                                          </code>
+                                        );
+                                      },
+                                    }}
+                                  >
+                                    {hasCraftsmanData ? displayText : part.text}
+                                  </ReactMarkdown>
+                                </div>
                               </div>
-                              <div className="min-w-0">
-                                <ReactMarkdown
-                                  components={{
-                                    code({
-                                      node,
-                                      inline,
-                                      className,
-                                      children,
-                                      ...props
-                                    }: {
-                                      node: any;
-                                      inline?: boolean;
-                                      className?: string;
-                                      children: React.ReactNode;
-                                      [key: string]: any;
-                                    }) {
-                                      const match = /language-(\w+)/.exec(
-                                        className || ""
-                                      );
-                                      return !inline && match ? (
-                                        <SyntaxHighlighter
-                                          style={atomDark}
-                                          language={match[1]}
-                                          PreTag="div"
-                                          {...props}
-                                        >
-                                          {String(children).replace(/\n$/, "")}
-                                        </SyntaxHighlighter>
-                                      ) : (
-                                        <code className={className} {...props}>
-                                          {children}
-                                        </code>
-                                      );
-                                    },
-                                  }}
-                                >
-                                  {part.text}
-                                </ReactMarkdown>
-                              </div>
-                            </div>
-                          ) : (
-                            part.text
-                          )}
-                        </div>
-                      );
-                  }
-                })}
-                <div className="text-xs mt-1 opacity-70 text-right">
-                  {new Date().toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
+                            ) : (
+                              part.text
+                            )}
+                          </div>
+                        );
+                    }
                   })}
+                  {/* Render craftsmen cards if available */}
+                  {hasCraftsmanData && craftsmenData.length > 0 && (
+                    <div className="mt-4">
+                      <CraftsmenGrid craftsmen={craftsmenData} />
+                    </div>
+                  )}
+                  <div className="text-xs mt-1 opacity-70 text-right">
+                    {new Date().toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {isLoading && (
             <div className="flex justify-start">
