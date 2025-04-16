@@ -1,8 +1,8 @@
 import { DataAPIClient } from "@datastax/astra-db-ts";
-import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import dotenv from 'dotenv';
+import axios from 'axios';
 dotenv.config();
-// Import our new embedding function
+// Import our embedding function
 import { generateSentenceEmbedding } from "../lib/sentence-transformer-embedding";
 
 type SimilarityMetric = "cosine" | "dot_product" | "euclidean";
@@ -15,26 +15,24 @@ const {
   SENTENCE_TRANSFORMER_API_URL,
 } = process.env;
 
-// Expanded list of URLs to scrape - add more TaskRabbit pages
-const scrapeUrls = [
-  "https://www.taskrabbit.com/",
-  "https://www.taskrabbit.com/services",
-  "https://www.taskrabbit.com/how-it-works",
-  "https://www.taskrabbit.com/about"
+// Craftsmen API configuration
+const CRAFTSMEN_API_URL = "http://20.199.86.3/api/client/search";
+const CRAFTSMEN_API_TOKEN = "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwOi8vMjAuMTk5Ljg2LjMvYXBpL2NsaWVudC9sb2dpbiIsImlhdCI6MTc0NDc5MTI2OSwiZXhwIjoxNzYyNzkxMjY5LCJuYmYiOjE3NDQ3OTEyNjksImp0aSI6IkVRNjJHNzBtTktxWm5HUEQiLCJzdWIiOiIyMSIsInBydiI6IjQxZWZiN2JhZDdmNmY2MzJlMjQwNWJkM2E3OTNiOGE2YmRlYzY3NzcifQ.fvc0R4trbNB4A8gthDOURzPeoJ1ZSQc3FNdiPe-I-O4";
+
+// List of crafts to fetch - customize this list based on your needs
+const craftsToFetch = [
+  "حداد", 
+  "نجار", 
+  "سباك", 
+  "كهربائي", 
+  "نقاش", 
+  "فني تكييف", 
+  "خراط"
 ];
 
 // Fixed DataAPIClient initialization with the required parameters
-const client = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN!, {
-  // Removed apiUrl as it is not a valid property
-});
-
+const client = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN!);
 const db = client.db(ASTRA_DB_API_ENDPOINT!, { keyspace: ASTRA_DB_NAMESPACE });
-
-// Improved text splitter with larger chunks and more overlap
-const text_splitter = new RecursiveCharacterTextSplitter({
-  chunkSize: 768,
-  chunkOverlap: 150,
-});
 
 // Updated to 384 dimensions for sentence-transformers/all-MiniLM-L6-v2
 const embeddingDimension = 384;
@@ -51,7 +49,7 @@ console.log("SENTENCE_TRANSFORMER_API_URL:", !!SENTENCE_TRANSFORMER_API_URL);
 async function checkCollection() {
   try {
     const collection = await db.collection(ASTRA_DB_COLLECTION!);
-    const count = await collection.countDocuments({}, 1000); // Adjust upperBound as needed
+    const count = await collection.countDocuments({}, 1000);
     console.log(`Collection ${ASTRA_DB_COLLECTION} exists with ${count} documents`);
     return {exists: true, count};
   } catch (error) {
@@ -108,8 +106,127 @@ const createCollection = async (
   }
 };
 
+// Fetch craftsmen data from API - FIXED VERSION
+async function fetchCraftsmenData(craft: string, page: number = 1) {
+  try {
+    console.log(`Fetching ${craft} craftsmen data, page ${page}...`);
+    
+    // FIXED: Proper structure for axios request
+    const response = await axios.post(
+      CRAFTSMEN_API_URL, 
+      // Request payload
+      {
+        pagination: 100,
+        page,
+        craft
+      },
+      // Request config
+      {
+        headers: {
+          'Authorization': CRAFTSMEN_API_TOKEN,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    
+    if (response.data && response.data.status === true) {
+      console.log(`Successfully fetched ${response.data.data.data.length} ${craft} craftsmen from page ${page}`);
+      return response.data.data;
+    } else {
+      console.error(`Error fetching ${craft} craftsmen:`, response.data);
+      return null;
+    }
+  } catch (error) {
+    console.error(`API error for ${craft}:`, error.message);
+    // Enhanced error logging
+    if (error.response) {
+      console.error('Response data:', error.response.data);
+      console.error('Response status:', error.response.status);
+      console.error('Response headers:', error.response.headers);
+    } else if (error.request) {
+      // The request was made but no response was received
+      console.error('No response received:', error.request);
+    }
+    return null;
+  }
+}
+
+// Alternative GET method implementation - uncomment if the POST method doesn't work
+/*
+async function fetchCraftsmenData(craft: string, page: number = 1) {
+  try {
+    console.log(`Fetching ${craft} craftsmen data, page ${page}...`);
+    
+    const response = await axios.get(
+      CRAFTSMEN_API_URL, 
+      {
+        params: {
+          pagination: 100,
+          page,
+          craft
+        },
+        headers: {
+          'Authorization': CRAFTSMEN_API_TOKEN,
+          'Accept': 'application/json'
+        }
+      }
+    );
+    
+    if (response.data && response.data.status === true) {
+      console.log(`Successfully fetched ${response.data.data.data.length} ${craft} craftsmen from page ${page}`);
+      return response.data.data;
+    } else {
+      console.error(`Error fetching ${craft} craftsmen:`, response.data);
+      return null;
+    }
+  } catch (error) {
+    console.error(`API error for ${craft}:`, error.message);
+    if (error.response) {
+      console.error('Response data:', error.response.data);
+      console.error('Response status:', error.response.status);
+      console.error('Response headers:', error.response.headers);
+    }
+    return null;
+  }
+}
+*/
+
+// Format craftsman data into searchable text
+function formatCraftsmanData(craftsman) {
+  let formattedText = `اسم الحرفي: ${craftsman.name}\n`;
+  formattedText += `المهنة: ${craftsman.craft?.name || 'غير محدد'}\n`;
+  formattedText += `العنوان: ${craftsman.address || 'غير محدد'}\n`;
+  
+  // Add cities
+  if (craftsman.cities && craftsman.cities.length > 0) {
+    formattedText += `المدن: ${craftsman.cities.map(c => c.city).join(', ')}\n`;
+  }
+  
+  // Add ratings
+  if (craftsman.average_rating) {
+    formattedText += `التقييم: ${craftsman.average_rating} (عدد التقييمات: ${craftsman.number_of_ratings || 0})\n`;
+  } else {
+    formattedText += "التقييم: غير متوفر\n";
+  }
+  
+  // Add job statistics
+  formattedText += `الوظائف المنجزة: ${craftsman.done_jobs_num || 0}\n`;
+  formattedText += `الوظائف النشطة: ${craftsman.active_jobs_num || 0}\n`;
+  
+  // Add description
+  if (craftsman.description) {
+    formattedText += `الوصف: ${craftsman.description}\n`;
+  }
+  
+  // Add status
+  formattedText += `الحالة: ${craftsman.status === 'free' ? 'متاح' : 'مشغول'}\n`;
+  
+  return formattedText;
+}
+
 export const loadSampleData = async () => {
-  console.log("Starting to load sample data...");
+  console.log("Starting to load craftsmen data...");
   try {
     const collection = await db.collection(ASTRA_DB_COLLECTION!);
     
@@ -118,158 +235,71 @@ export const loadSampleData = async () => {
     
     let totalDocuments = 0;
     
-    for (const url of scrapeUrls) {
-      console.log(`Processing URL: ${url}`);
-      const content = await scrapePage(url);
+    // Process each craft type
+    for (const craft of craftsToFetch) {
+      console.log(`Processing craft: ${craft}`);
       
-      if (!content || content.trim() === "") {
-        console.warn(`No content scraped from ${url}, skipping`);
-        continue;
-      }
+      // Start with page 1
+      let currentPage = 1;
+      let hasMorePages = true;
       
-      console.log(`Content length: ${content.length} characters`);
-      const chunks = await text_splitter.splitText(content);
-      console.log(`Split into ${chunks.length} chunks`);
-      
-      // Extract title from the first chunk for metadata
-      const pageTitle = content.split('\n')[0].trim();
-      
-      for (const chunk of chunks) {
-        if (chunk.trim() === "") {
-          console.warn("Empty chunk, skipping");
+      while (hasMorePages) {
+        const apiResponse = await fetchCraftsmenData(craft, currentPage);
+        
+        if (!apiResponse || !apiResponse.data || apiResponse.data.length === 0) {
+          console.log(`No more data for ${craft}`);
+          hasMorePages = false;
           continue;
         }
         
-        try {
-          console.log(`Processing chunk: ${chunk.substring(0, 50)}...`);
-          const embeddingResult = await generateSentenceEmbedding(chunk);
-          const vector = embeddingResult.embedding;
+        const craftsmen = apiResponse.data;
+        console.log(`Processing ${craftsmen.length} ${craft} craftsmen from page ${currentPage}`);
+        
+        // Process each craftsman
+        for (const craftsman of craftsmen) {
+          // Format craftsman data into searchable text
+          const formattedText = formatCraftsmanData(craftsman);
           
-          // Add more metadata and a keyword for better searchability
-          const res = await collection.insertOne({
-            $vector: vector,
-            text: chunk,
-            title: pageTitle,
-            sourceUrl: url,
-            keywords: ["taskrabbit", "task rabbit", "home services"],
-            timestamp: new Date().toISOString()
-          });
-          
-          console.log(`Document inserted with ID: ${res.insertedId}`);
-          totalDocuments++;
-        } catch (error) {
-          console.error("Error processing chunk:", error);
+          try {
+            console.log(`Processing craftsman: ${craftsman.name}`);
+            const embeddingResult = await generateSentenceEmbedding(formattedText);
+            const vector = embeddingResult.embedding;
+            
+            // Add document to collection with metadata
+            const res = await collection.insertOne({
+              $vector: vector,
+              text: formattedText,
+              title: `${craftsman.name} - ${craftsman.craft?.name || 'حرفي'}`,
+              sourceId: craftsman.id.toString(),
+              craft: craftsman.craft?.name || '',
+              cities: craftsman.cities?.map(c => c.city) || [],
+              keywords: ["حرفي", craftsman.craft?.name || '', ...craftsman.cities?.map(c => c.city) || []],
+              timestamp: new Date().toISOString(),
+              rawData: craftsman // Store the full raw data for reference
+            });
+            
+            console.log(`Document inserted with ID: ${res.insertedId}`);
+            totalDocuments++;
+          } catch (error) {
+            console.error("Error processing craftsman:", error);
+          }
+        }
+        
+        // Check if there are more pages
+        if (apiResponse.last_page > currentPage) {
+          currentPage++;
+        } else {
+          hasMorePages = false;
         }
       }
     }
     
-    console.log(`Total documents inserted: ${totalDocuments}`);
+    console.log(`Total craftsmen documents inserted: ${totalDocuments}`);
   } catch (error) {
     console.error("Error in loadSampleData:", error);
     throw error;
   }
 };
-
-async function scrapePage(url: string) {
-  console.log(`Starting to scrape: ${url}`);
-  
-  try {
-    const puppeteer = require('puppeteer');
-    const browser = await puppeteer.launch({ 
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'] 
-    });
-    const page = await browser.newPage();
-    
-    // Set more browser-like behavior
-    await page.setViewport({ width: 1280, height: 800 });
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => false });
-    });
-    
-    // Set a user agent to mimic a real browser
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36');
-    
-    // Navigate to URL with longer timeout
-    await page.goto(url, { 
-      waitUntil: 'networkidle2', 
-      timeout: 90000 
-    });
-    
-    // Wait a bit for any JavaScript to execute
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    
-    // Extract the page title for metadata
-    const pageTitle = await page.title();
-    
-    // Extract text content with improved approach
-    const content = await page.evaluate(() => {
-      // Function to get visible text from node, with better formatting
-      function getVisibleText(node) {
-        let text = '';
-        
-        // Skip script, style tags, etc.
-        const tagsToSkip = ['SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG'];
-        if (node.tagName && tagsToSkip.includes(node.tagName)) {
-          return '';
-        }
-        
-        if (node.nodeType === Node.TEXT_NODE) {
-          let nodeText = node.textContent.trim();
-          if (nodeText) {
-            text += nodeText + ' ';
-          }
-        } else {
-          const style = window.getComputedStyle(node);
-          if (style && style.display !== 'none' && style.visibility !== 'hidden') {
-            // Check if this is a heading tag
-            if (node.tagName && ['H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(node.tagName)) {
-              const headingText = node.textContent.trim();
-              if (headingText) {
-                text += '\n\n' + headingText + '\n\n';
-              }
-            } 
-            // Check if this is a paragraph
-            else if (node.tagName === 'P') {
-              const pText = node.textContent.trim();
-              if (pText) {
-                text += pText + '\n\n';
-              }
-            }
-            // Process other elements
-            else {
-              for (let child of node.childNodes) {
-                text += getVisibleText(child);
-              }
-              
-              // Add breaks for certain elements
-              if (['DIV', 'SECTION', 'ARTICLE'].includes(node.tagName)) {
-                text += '\n';
-              }
-            }
-          }
-        }
-        return text;
-      }
-      
-      // Try to get main content first, fall back to body
-      const mainContent = document.querySelector('main') || document.querySelector('article') || document.body;
-      
-      // Add page title at the beginning
-      return document.title + '\n\n' + getVisibleText(mainContent);
-    });
-    
-    // Log and close browser
-    console.log(`Extracted ${content.length} characters of text`);
-    console.log(`Sample: ${content.substring(0, 200)}`);
-    await browser.close();
-    
-    return content;
-  } catch (error) {
-    console.error(`Error scraping ${url}:`, error);
-    return "";
-  }
-}
 
 // Helper function to delete collection if needed (useful for reset)
 async function deleteCollection() {
@@ -294,8 +324,10 @@ async function debugDbContents() {
       const sample = await collection.findOne({});
       console.log("Sample document:", {
         id: sample._id,
-        text_preview: sample.text.substring(0, 100),
         title: sample.title || "No title",
+        text_preview: sample.text.substring(0, 100),
+        craft: sample.craft || "No craft",
+        cities: sample.cities || "No cities",
         keywords: sample.keywords || "No keywords",
         vector_length: sample.$vector ? sample.$vector.length : 'No vector found'
       });
@@ -305,11 +337,54 @@ async function debugDbContents() {
   }
 }
 
-// Main execution
-createCollection()
-  .then(() => loadSampleData())
-  .then(() => debugDbContents())
-  .catch(error => {
+// Function to test API connection
+async function testApiConnection() {
+  console.log("Testing API connection...");
+  try {
+    // Try a simple request to test connectivity
+    const testResponse = await axios.get(
+      CRAFTSMEN_API_URL.replace('/search', ''), // Try the base endpoint
+      {
+        headers: {
+          'Authorization': CRAFTSMEN_API_TOKEN,
+          'Accept': 'application/json'
+        }
+      }
+    );
+    console.log("API connection test response status:", testResponse.status);
+    console.log("API connection successful");
+  } catch (error) {
+    console.error("API connection test failed:", error.message);
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+    }
+    console.log("Please verify the API endpoint and authentication token");
+  }
+}
+
+// Main execution with added API test
+async function main() {
+  try {
+    // Test API connection first
+    await testApiConnection();
+    
+    // Then proceed with database operations
+    await createCollection();
+    
+    // Optional: Uncomment to reset database before loading
+    // const resetResult = await deleteCollection();
+    // if (resetResult) {
+    //   await createCollection();
+    // }
+    
+    await loadSampleData();
+    await debugDbContents();
+    console.log("Script completed successfully");
+  } catch (error) {
     console.error("Script failed:", error);
     process.exit(1);
-  });
+  }
+}
+
+// Execute the main function
+main();
