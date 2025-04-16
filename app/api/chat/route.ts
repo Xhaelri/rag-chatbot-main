@@ -229,7 +229,7 @@ If you're unsure whether the context provides sufficient information, err on the
 
     // Create the AI stream using Google Gemini
     const result = await streamText({
-      model: google("gemini-2.5-pro-exp-03-25"), // Use your Gemini model
+      model: google("gemini-1.5-flash"), // Use your Gemini model
       messages: allMessages,
       temperature: 0.2, // Lower temperature for more factual responses
     });
